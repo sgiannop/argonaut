@@ -144,6 +144,14 @@ target_link_libraries(argonaut PRIVATE argonaut_core Qt6::Widgets)
 # Open/Save windows for other apps (xdg-desktop-portal FileChooser backend), Linux.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(argonaut PRIVATE src/ChooserBar.h src/ChooserBar.cpp)
+    # WM_TRANSIENT_FOR on those windows (X11): one xcb call Qt has no API for.
+    if(PkgConfig_FOUND)
+        pkg_check_modules(XCB IMPORTED_TARGET xcb)
+    endif()
+    if(XCB_FOUND)
+        target_compile_definitions(argonaut PRIVATE ARGONAUT_XCB=1)
+        target_link_libraries(argonaut PRIVATE PkgConfig::XCB)
+    endif()
 endif()
 # One version number for the app, the About box and the installer.
 target_compile_definitions(argonaut PRIVATE ARGONAUT_VERSION="${PROJECT_VERSION}")

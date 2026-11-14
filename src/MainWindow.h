@@ -79,6 +79,7 @@ signals:
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void changeEvent(QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -525,7 +526,8 @@ private:
     bool m_chooserDone = false;
     bool m_chooserAsking = false; // the "Replace?" question is open
     QList<QAction *> m_chooserOff; // commands an Open/Save window doesn't offer
-    QWindow *m_chooserParent = nullptr;
+    void attachToChooserParent();
+    quint64 m_chooserParentId = 0; // the asking app's X11 window, or 0
 #endif
     QVBoxLayout *m_contentLayout = nullptr;
     QWidget *m_menuRow = nullptr; // the menu bar's row; drags the window like the bar

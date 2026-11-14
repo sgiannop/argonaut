@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#if defined(ARGONAUT_XCB)
+#include <xcb/xcb.h>
+#endif
 #if defined(ARGONAUT_DBUS)
 #include "ChooserBar.h"
 #include "FileChooserPortal.h"
@@ -5407,27 +5410,14 @@ void MainWindow::startChooser(const ChooserRequest &request)
     m_detailView->setSelectionMode(selection);
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &MainWindow::updateChooser);
 
-    // Attach it to the window of the app that asked (X11 "x11:<hex id>";
-    // Wayland handles would need xdg-foreign). Qt's xcb plugin only writes
-    // WM_TRANSIENT_FOR for dialog-type windows, so the window becomes one:
-    // without that the desktop treats it as unrelated, and it drops behind
-    // the app whenever the app comes forward. Not modal: GNOME glues modal
-    // dialogs to their parent, and then they can't be moved.
-    WId parentId = 0;
+    // The window of the app that asked (X11 "x11:<hex id>"; Wayland handles
+    // would need xdg-foreign). attachToChooserParent() ties us to it once
+    // the window is on screen.
     if (request.parentWindow.startsWith(QLatin1String("x11:"))) {
         bool ok = false;
-        parentId = WId(request.parentWindow.mid(4).toULongLong(&ok, 16));
+        m_chooserParentId = request.parentWindow.mid(4).toULongLong(&ok, 16);
         if (!ok)
-            parentId = 0;
-    }
-    if (parentId) {
-        setWindowFlag(Qt::Dialog); // re-creates the native window: before anything uses it
-        winId();
-        m_chooserParent = QWindow::fromWinId(parentId);
-        if (m_chooserParent && windowHandle()) {
-            connect(this, &QObject::destroyed, m_chooserParent, &QObject::deleteLater);
-            windowHandle()->setTransientParent(m_chooserParent);
-        }
+            m_chooserParentId = 0;
     }
 
     // Only the size is remembered. It opens in the middle of the screen with
@@ -5455,6 +5445,36 @@ void MainWindow::startChooser(const ChooserRequest &request)
     updateChooser();
     if (request.mode == Mode::Save)
         QTimer::singleShot(0, this, [this] { m_chooserBar->focusName(); });
+}
+
+// Makes the Open/Save window "transient for" the app's window, so the
+// desktop keeps it above that app. Written straight onto the X11 window:
+// Qt's xcb plugin sets WM_TRANSIENT_FOR only for dialog-type windows (and
+// deletes it on show() for others), and a dialog-type window can't be
+// minimised or maximised under GNOME. Not modal either: GNOME glues modal
+// dialogs to their parent, and then they can't be moved.
+void MainWindow::attachToChooserParent()
+{
+#if defined(ARGONAUT_XCB)
+    if (!m_chooserParentId || !windowHandle())
+        return;
+    auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
+    if (!x11 || !x11->connection())
+        return; // Wayland
+    const xcb_window_t parent = xcb_window_t(m_chooserParentId);
+    xcb_change_property(x11->connection(), XCB_PROP_MODE_REPLACE, xcb_window_t(winId()), XCB_ATOM_WM_TRANSIENT_FOR,
+                        XCB_ATOM_WINDOW, 32, 1, &parent);
+    xcb_flush(x11->connection());
+#endif
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+#if defined(ARGONAUT_DBUS)
+    if (m_chooser) // after Qt's own show(), which clears the property
+        QTimer::singleShot(0, this, &MainWindow::attachToChooserParent);
+#endif
 }
 
 void MainWindow::cancelChooser()
