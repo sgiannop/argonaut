@@ -153,6 +153,22 @@ void PathBar::mouseReleaseEvent(QMouseEvent *event)
 
 bool PathBar::eventFilter(QObject *watched, QEvent *event)
 {
+    // A crumb: a click opens its folder, a drag moves the window like the
+    // rest of the header.
+    if (auto *crumb = qobject_cast<QToolButton *>(watched); crumb && crumb->parent() == m_crumbs) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        if (event->type() == QEvent::MouseButtonPress && mouse->button() == Qt::LeftButton) {
+            m_pressPos = mouse->globalPosition().toPoint();
+        } else if (event->type() == QEvent::MouseMove && (mouse->buttons() & Qt::LeftButton)
+                   && (mouse->globalPosition().toPoint() - m_pressPos).manhattanLength()
+                          >= QApplication::startDragDistance()) {
+            crumb->setDown(false); // no click when the button is let go
+            if (QWindow *handle = window()->windowHandle())
+                handle->startSystemMove();
+            return true;
+        }
+        return QFrame::eventFilter(watched, event);
+    }
     if (watched == m_crumbs && event->type() == QEvent::Resize) {
         fitCrumbs();
     } else if (watched == m_edit) {
@@ -237,6 +253,7 @@ void PathBar::rebuild()
         }
         const QString target = seg.path;
         connect(button, &QToolButton::clicked, this, [this, target] { emit pathActivated(target); });
+        button->installEventFilter(this); // a drag on it moves the window
         m_crumbLayout->addWidget(button);
 
         QList<QWidget *> group{button};
