@@ -5363,8 +5363,11 @@ void MainWindow::startChooser(const ChooserRequest &request)
 
     // What a dialog doesn't need: the menus, terminal, Analyze, split view,
     // tabs, and commands that would open other windows or quit the service.
+    // The menu bar stays (empty): its row holds the window buttons at the
+    // right and drags or maximises the window like in the file manager.
     if (m_menuBar)
-        m_menuBar->hide();
+        for (QAction *menu : m_menuBar->actions())
+            menu->setVisible(false);
     for (QToolButton *button : {m_terminalButton, m_analyzeButton, m_splitButton, m_menuButton})
         if (button)
             button->hide();
