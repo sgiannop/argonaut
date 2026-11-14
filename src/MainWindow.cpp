@@ -5400,10 +5400,31 @@ void MainWindow::startChooser(const ChooserRequest &request)
     m_detailView->setSelectionMode(selection);
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &MainWindow::updateChooser);
 
+    // Attach it to the window of the app that asked (X11 "x11:<hex id>";
+    // Wayland handles would need xdg-foreign). Qt's xcb plugin only writes
+    // WM_TRANSIENT_FOR for dialog-type windows, so the window becomes one:
+    // without that the desktop treats it as unrelated, and it drops behind
+    // the app whenever the app comes forward. Not modal: GNOME glues modal
+    // dialogs to their parent, and then they can't be moved.
+    WId parentId = 0;
+    if (request.parentWindow.startsWith(QLatin1String("x11:"))) {
+        bool ok = false;
+        parentId = WId(request.parentWindow.mid(4).toULongLong(&ok, 16));
+        if (!ok)
+            parentId = 0;
+    }
+    if (parentId) {
+        setWindowFlag(Qt::Dialog); // re-creates the native window: before anything uses it
+        winId();
+        m_chooserParent = QWindow::fromWinId(parentId);
+        if (m_chooserParent && windowHandle()) {
+            connect(this, &QObject::destroyed, m_chooserParent, &QObject::deleteLater);
+            windowHandle()->setTransientParent(m_chooserParent);
+        }
+    }
+
     // Only the size is remembered. It opens in the middle of the screen with
-    // the mouse, i.e. where the app that asked was just clicked (GNOME
-    // centres only modal dialogs on their app, and Qt can't read the
-    // geometry of another program's window).
+    // the mouse, i.e. where the app that asked was just clicked.
     const QSize size = QSettings().value("chooser/size").toSize();
     resize(size.isValid() ? size : QSize(960, 620));
     if (QScreen *screen = QGuiApplication::screenAt(QCursor::pos())) {
@@ -5424,18 +5445,6 @@ void MainWindow::startChooser(const ChooserRequest &request)
         navigateTo(start);
     refreshChrome(); // the title
 
-    // On top of the app that asked (X11; Wayland handles need xdg-foreign).
-    if (request.parentWindow.startsWith(QLatin1String("x11:"))) {
-        bool ok = false;
-        const WId id = WId(request.parentWindow.mid(4).toULongLong(&ok, 16));
-        if (ok && id && windowHandle()) {
-            m_chooserParent = QWindow::fromWinId(id);
-            if (m_chooserParent) {
-                connect(this, &QObject::destroyed, m_chooserParent, &QObject::deleteLater);
-                windowHandle()->setTransientParent(m_chooserParent); // placed over it, kept above it
-            }
-        }
-    }
     updateChooser();
     if (request.mode == Mode::Save)
         QTimer::singleShot(0, this, [this] { m_chooserBar->focusName(); });
