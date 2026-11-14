@@ -80,7 +80,10 @@
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QPainter>
+#include <QCursor>
+#include <QGuiApplication>
 #include <QPointer>
+#include <QScreen>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStandardPaths>
@@ -5397,8 +5400,17 @@ void MainWindow::startChooser(const ChooserRequest &request)
     m_detailView->setSelectionMode(selection);
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &MainWindow::updateChooser);
 
-    if (!restoreGeometry(QSettings().value("chooser/geometry").toByteArray()))
-        resize(960, 620);
+    // Only the size is remembered. It opens in the middle of the screen with
+    // the mouse, i.e. where the app that asked was just clicked (GNOME
+    // centres only modal dialogs on their app, and Qt can't read the
+    // geometry of another program's window).
+    const QSize size = QSettings().value("chooser/size").toSize();
+    resize(size.isValid() ? size : QSize(960, 620));
+    if (QScreen *screen = QGuiApplication::screenAt(QCursor::pos())) {
+        const QRect area = screen->availableGeometry();
+        resize(this->size().boundedTo(area.size() * 0.9)); // never larger than the screen
+        move(area.center() - rect().center());
+    }
 
     // Start where the app asked, else where this app saved or opened last.
     QString start = request.currentFolder;
@@ -5420,10 +5432,7 @@ void MainWindow::startChooser(const ChooserRequest &request)
             m_chooserParent = QWindow::fromWinId(id);
             if (m_chooserParent) {
                 connect(this, &QObject::destroyed, m_chooserParent, &QObject::deleteLater);
-                windowHandle()->setTransientParent(m_chooserParent);
-                const QRect parent = m_chooserParent->geometry();
-                if (parent.isValid() && parent.width() > 100)
-                    move(parent.center() - rect().center());
+                windowHandle()->setTransientParent(m_chooserParent); // placed over it, kept above it
             }
         }
     }
@@ -5605,7 +5614,8 @@ void MainWindow::finishChooser(uint response, const QStringList &paths)
         if (!DirectoryModel::isVirtualPath(m_current) && !m_model->isTrash())
             QSettings().setValue(chooserFolderKey(), m_current);
     }
-    QSettings().setValue("chooser/geometry", saveGeometry());
+    if (!isMaximized())
+        QSettings().setValue("chooser/size", size());
     emit chooserFinished(response, results);
     QTimer::singleShot(0, this, &QWidget::close); // not from inside closeEvent
 }

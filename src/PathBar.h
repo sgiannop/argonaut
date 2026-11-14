@@ -31,7 +31,11 @@ signals:
     void pathActivated(const QString &path);
 
 protected:
+    // A click on the free space types a path; a drag moves the window (it's
+    // most of the header, which drags everywhere else).
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
@@ -48,4 +52,6 @@ private:
     QToolButton *m_menuButton;
     QToolButton *m_gitBadge;
     QList<QList<QWidget *>> m_groups; // a crumb button + its trailing "/"
+    bool m_pressed = false;
+    QPoint m_pressPos;
 };

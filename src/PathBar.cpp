@@ -5,7 +5,10 @@
 #include "DirectoryModel.h"
 #include "Trash.h"
 
+#include <QApplication>
 #include <QDir>
+#include <QMouseEvent>
+#include <QWindow>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -116,11 +119,36 @@ void PathBar::stopEditing()
 void PathBar::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
-        startEditing();
+        m_pressed = true; // click or drag: decided by what comes next
+        m_pressPos = event->position().toPoint();
         event->accept();
         return;
     }
     QFrame::mousePressEvent(event);
+}
+
+void PathBar::mouseMoveEvent(QMouseEvent *event)
+{
+    if (m_pressed && (event->buttons() & Qt::LeftButton)
+        && (event->position().toPoint() - m_pressPos).manhattanLength() >= QApplication::startDragDistance()) {
+        m_pressed = false;
+        if (QWindow *handle = window()->windowHandle())
+            handle->startSystemMove();
+        event->accept();
+        return;
+    }
+    QFrame::mouseMoveEvent(event);
+}
+
+void PathBar::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (m_pressed && event->button() == Qt::LeftButton) {
+        m_pressed = false;
+        startEditing();
+        event->accept();
+        return;
+    }
+    QFrame::mouseReleaseEvent(event);
 }
 
 bool PathBar::eventFilter(QObject *watched, QEvent *event)
