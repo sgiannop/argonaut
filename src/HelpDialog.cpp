@@ -574,6 +574,17 @@ reading files over USB or the network is slow; Preferences can change that.</p>
 and the Super+E key. The same button switches back to GNOME Files.</p>
 )");
 #endif
+#if defined(ARGONAUT_DBUS)
+    prefs += tr(R"(
+<h2>Open and Save windows</h2>
+<p>When an app such as Firefox, Signal or Chrome opens or saves a file, it asks the desktop for a window
+to pick it. Preferences → <b>Use Argonaut for Open and Save</b> makes that window Argonaut, with your
+sidebar, bookmarks, search and views. Pick a file and press <b>Open</b> (or double-click it); to save,
+type a name and press <b>Save</b>; Argonaut asks before replacing a file that's already there.
+The app's own options (a file type, an encoding…) are at the bottom. [[Esc]] cancels.</p>
+<p>It needs the installed package. The same button switches back to the desktop's own windows.</p>
+)");
+#endif
     add("prefs", tr("Preferences"), prefs);
 
     add("shortcuts", tr("Keyboard Shortcuts"), QString()); // made from the actions

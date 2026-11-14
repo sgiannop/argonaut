@@ -17,7 +17,11 @@
 #include <cstdio>
 
 #if defined(ARGONAUT_DBUS)
+#include "FileChooserPortal.h"
 #include "FileManagerService.h"
+#include <QElapsedTimer>
+#include <QHash>
+#include <QPointer>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusMessage>
@@ -213,6 +217,9 @@ int main(int argc, char *argv[])
     const QCommandLineOption service("service", QApplication::translate(
         "main", "Answer \"Show in folder\" for other apps (started by D-Bus)."));
     parser.addOption(service);
+    const QCommandLineOption portal("portal", QApplication::translate(
+        "main", "Show Open and Save windows for other apps (started by D-Bus)."));
+    parser.addOption(portal);
     parser.addOption({"make-default", QApplication::translate("main", "Make Argonaut the file manager for folders and \"Show in folder\".")});
     parser.addOption({{"restore-nautilus", "restore-default"},
                       QApplication::translate("main", "Give folders back to Nautilus (or the previous file manager).")});
@@ -221,6 +228,45 @@ int main(int argc, char *argv[])
     parser.process(app);
 
 #if defined(ARGONAUT_DBUS)
+    if (parser.isSet(portal)) {
+        // xdg-desktop-portal asks us for Open/Save windows (only when the
+        // user chose Argonaut for them: PortalConfig). One window per request;
+        // we stay a while for the next one, then leave (D-Bus starts us again).
+        app.setQuitOnLastWindowClosed(false);
+        FileChooserPortal chooser;
+        if (!chooser.registerOn(QDBusConnection::sessionBus())) {
+            std::fprintf(stderr, "argonaut: the Open/Save service is already running.\n");
+            return 1;
+        }
+        QHash<int, QPointer<MainWindow>> windows;
+        QElapsedTimer idle;
+        idle.start();
+        QObject::connect(&chooser, &FileChooserPortal::requested, &app,
+                         [&chooser, &windows, &idle](int id, const ChooserRequest &request) {
+                             idle.restart();
+                             MainWindow *window = newWindow();
+                             windows.insert(id, window);
+                             QObject::connect(window, &MainWindow::chooserFinished, &chooser,
+                                              [&chooser, &windows, &idle, id](uint response, const QVariantMap &results) {
+                                                  idle.restart();
+                                                  windows.remove(id);
+                                                  chooser.finish(id, response, results);
+                                              });
+                             window->startChooser(request);
+                             present(window, QString());
+                         });
+        QObject::connect(&chooser, &FileChooserPortal::closeRequested, &app, [&windows](int id) {
+            if (MainWindow *window = windows.value(id))
+                window->cancelChooser();
+        });
+        auto *leave = new QTimer(&app);
+        QObject::connect(leave, &QTimer::timeout, &app, [&chooser, &idle] {
+            if (chooser.pendingCount() == 0 && idle.elapsed() > 5 * 60 * 1000)
+                QApplication::quit();
+        });
+        leave->start(30000);
+        return app.exec();
+    }
     if (parser.isSet(service)) {
         // D-Bus started us for org.freedesktop.FileManager1 (or Preferences
         // did). We stay running while Argonaut is the default: a Nautilus
@@ -272,6 +318,7 @@ int main(int argc, char *argv[])
     }
 #else
     Q_UNUSED(service)
+    Q_UNUSED(portal)
 #endif
 
     // Folders open (the first here, the others in tabs); files are shown

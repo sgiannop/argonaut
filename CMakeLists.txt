@@ -71,7 +71,11 @@ target_link_libraries(argonaut_core PUBLIC Qt6::Widgets Qt6::Xml Qt6::Network)
 # "Show in folder" for other apps (org.freedesktop.FileManager1), Linux only.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Qt6 6.4 REQUIRED COMPONENTS DBus)
-    target_sources(argonaut_core PRIVATE src/FileManagerService.h src/FileManagerService.cpp)
+    target_sources(argonaut_core PRIVATE
+        src/FileManagerService.h src/FileManagerService.cpp
+        src/FileChooserRequest.h src/FileChooserRequest.cpp
+        src/FileChooserPortal.h src/FileChooserPortal.cpp
+        src/PortalConfig.h src/PortalConfig.cpp)
     target_link_libraries(argonaut_core PUBLIC Qt6::DBus)
     target_compile_definitions(argonaut_core PUBLIC ARGONAUT_DBUS=1)
 endif()
@@ -137,6 +141,10 @@ qt_add_executable(argonaut
 )
 
 target_link_libraries(argonaut PRIVATE argonaut_core Qt6::Widgets)
+# Open/Save windows for other apps (xdg-desktop-portal FileChooser backend), Linux.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(argonaut PRIVATE src/ChooserBar.h src/ChooserBar.cpp)
+endif()
 # One version number for the app, the About box and the installer.
 target_compile_definitions(argonaut PRIVATE ARGONAUT_VERSION="${PROJECT_VERSION}")
 if(LIBARCHIVE_FOUND)
@@ -180,6 +188,15 @@ if(UNIX AND NOT APPLE)
     configure_file(data/argonaut.desktop.in ${CMAKE_CURRENT_BINARY_DIR}/argonaut.desktop @ONLY)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/argonaut.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     install(FILES data/argonaut.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+    # Open/Save windows for other apps. No UseIn in argonaut.portal: the
+    # portal uses it only where the user chose it (Preferences writes their
+    # portals.conf). xdg-desktop-portal reads only /usr/share, so this works
+    # from the package, not from a ~/.local install.
+    configure_file(data/org.freedesktop.impl.portal.desktop.argonaut.service.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/org.freedesktop.impl.portal.desktop.argonaut.service @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.freedesktop.impl.portal.desktop.argonaut.service
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/dbus-1/services)
+    install(FILES data/argonaut.portal DESTINATION ${CMAKE_INSTALL_DATADIR}/xdg-desktop-portal/portals)
     # Let menus and "Open With" see the new entry right away.
     install(CODE [[
         find_program(UPDATE_DESKTOP_DATABASE update-desktop-database)

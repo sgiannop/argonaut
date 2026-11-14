@@ -1,4 +1,8 @@
 #include "MainWindow.h"
+#if defined(ARGONAUT_DBUS)
+#include "ChooserBar.h"
+#include "FileChooserPortal.h"
+#endif
 
 #include "AboutDialog.h"
 #include "Access.h"
@@ -367,6 +371,8 @@ QWidget#aboutCard { background: @pathBg; border-radius: 10px; }
 QLabel#aboutCardHeading { color: @fg; font-weight: bold; }
 QLabel#aboutCardText { color: @dim; }
 QLabel#aboutLabel { color: @dim; }
+QWidget#chooserBar { background: @sidebar; border-top: 1px solid @border; }
+QLabel#chooserLabel { color: @fg; }
 QLabel#aboutValue { color: @fg; }
 QPushButton#aboutClose { background: @accent; color: #ffffff; border: none; border-radius: 6px;
     padding: 7px 18px; font-weight: bold; }
@@ -1021,6 +1027,7 @@ QWidget *MainWindow::buildContentPane()
     auto *layout = new QVBoxLayout(pane);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
+    m_contentLayout = layout; // an Open/Save window adds its bar at the bottom
 
     auto *header = new HeaderBar(pane);
     QHBoxLayout *row = header->row();
@@ -1466,7 +1473,17 @@ void MainWindow::refreshChrome()
     m_trashBar->setVisible(m_model->isTrash());
     m_pathBar->setPath(m_current);
     updateGitBadge();
-    setWindowTitle(tr("%1 — Argonaut").arg(titleFor(m_current)));
+#if defined(ARGONAUT_DBUS)
+    if (m_chooser) {
+        const bool folder = m_chooser->directory;
+        const QString fallback = m_chooser->mode == ChooserRequest::Mode::Open
+                                     ? (folder ? tr("Select Folder") : tr("Open"))
+                                     : tr("Save");
+        setWindowTitle(m_chooser->title.isEmpty() ? fallback : m_chooser->title);
+        m_titleLabel->setText(fallback); // short: apps' titles can be long
+    } else
+#endif
+        setWindowTitle(tr("%1 — Argonaut").arg(titleFor(m_current)));
     syncSidebarSelection();
     updateActions();
     updateEditActions();
@@ -2868,6 +2885,15 @@ void MainWindow::openIndex(const QModelIndex &viewIndex)
 {
     const QModelIndex index = toSource(viewIndex);
     const QString path = m_model->filePath(index);
+#if defined(ARGONAUT_DBUS)
+    if (m_chooser && !m_model->isDir(index)) { // a file: that's the choice
+        if (m_chooser->mode == ChooserRequest::Mode::Save)
+            m_chooserBar->setName(QFileInfo(path).fileName());
+        if (m_chooser->mode != ChooserRequest::Mode::SaveFiles && !m_chooser->directory)
+            chooserAccept();
+        return;
+    }
+#endif
     if (m_model->isDir(index))
         navigateTo(path);
     else
@@ -2887,6 +2913,9 @@ void MainWindow::updateActions()
         m_analyzeButton->setEnabled(!place);
     m_backButton->setEnabled(m_backAct->isEnabled());
     m_forwardButton->setEnabled(m_forwardAct->isEnabled());
+#if defined(ARGONAUT_DBUS)
+    keepChooserActionsOff();
+#endif
 }
 
 // ----------------------------------------------------------- view modes ---
@@ -3537,6 +3566,16 @@ QStringList MainWindow::selectedPaths() const
 
 void MainWindow::openSelection()
 {
+#if defined(ARGONAUT_DBUS)
+    if (m_chooser) {
+        const QStringList paths = selectedPaths();
+        if (paths.size() == 1 && QFileInfo(paths.first()).isDir() && !m_chooser->directory)
+            navigateTo(paths.first());
+        else
+            chooserAccept();
+        return;
+    }
+#endif
     const QModelIndexList selected = selectedViewIndexes();
     if (selected.size() == 1) {
         openIndex(selected.first());
@@ -3716,6 +3755,9 @@ void MainWindow::updateEditActions()
     const bool toOther = hasSelection && !inTrash && !otherPaneFolder().isEmpty();
     m_copyToOtherAct->setEnabled(toOther);
     m_moveToOtherAct->setEnabled(toOther && changeable);
+#if defined(ARGONAUT_DBUS)
+    keepChooserActionsOff();
+#endif
 }
 
 void MainWindow::showContextMenu(const QPoint &pos)
@@ -3993,6 +4035,13 @@ void MainWindow::closeEvent(QCloseEvent *event)
         }
         m_ops->cancelAll();
     }
+#if defined(ARGONAUT_DBUS)
+    if (m_chooser) { // an Open/Save window: no answer yet means Cancel
+        finishChooser(FileChooserPortal::Cancelled);
+        QMainWindow::closeEvent(event);
+        return; // the file manager's own settings stay as they were
+    }
+#endif
     if (m_activePane != 0)
         activatePane(0); // settings describe the first pane
     saveSettings();
@@ -5291,3 +5340,270 @@ void MainWindow::fixExtension(const QString &path)
     selectPaths({target});
     showMessage(tr("Renamed to “%1”").arg(QFileInfo(target).fileName()));
 }
+
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+#if defined(ARGONAUT_DBUS)
+    // Esc that nothing else wanted (rename, search, type-ahead) cancels.
+    if (m_chooser && event->key() == Qt::Key_Escape) {
+        finishChooser(FileChooserPortal::Cancelled);
+        return;
+    }
+#endif
+    QMainWindow::keyPressEvent(event);
+}
+
+// ------------------------------------------------------ Open/Save window ---
+#if defined(ARGONAUT_DBUS)
+
+void MainWindow::startChooser(const ChooserRequest &request)
+{
+    using Mode = ChooserRequest::Mode;
+    m_chooser = request;
+
+    // What a dialog doesn't need: the menus, terminal, Analyze, split view,
+    // tabs, and commands that would open other windows or quit the service.
+    if (m_menuBar)
+        m_menuBar->hide();
+    for (QToolButton *button : {m_terminalButton, m_analyzeButton, m_splitButton, m_menuButton})
+        if (button)
+            button->hide();
+    m_chooserOff = {m_splitAct,      m_terminalAct,   m_openTerminalHereAct, m_analyzeAct,   m_newTabAct,
+                    m_reopenTabAct,  m_openInNewTabAct, m_quitAct,           m_prefsAct,     m_paletteAct,
+                    m_organizeAct,   m_copyToOtherAct, m_moveToOtherAct,     m_aboutAct,     m_guideAct,
+                    m_shortcutsAct};
+    m_chooserOff.removeAll(nullptr);
+    keepChooserActionsOff();
+
+    m_chooserBar = new ChooserBar(request, this);
+    m_contentLayout->addWidget(m_chooserBar);
+    connect(m_chooserBar, &ChooserBar::accepted, this, &MainWindow::chooserAccept);
+    connect(m_chooserBar, &ChooserBar::rejected, this, [this] { finishChooser(FileChooserPortal::Cancelled); });
+    auto applyFilter = [this](int index) {
+        std::optional<ChooserRequest::Filter> filter;
+        if (index >= 0 && index < m_chooser->filters.size())
+            filter = m_chooser->filters.at(index);
+        m_proxy->setChooserFilter(filter, m_chooser->directory);
+    };
+    applyFilter(m_chooserBar->currentFilter());
+    connect(m_chooserBar, &ChooserBar::filterChanged, this, applyFilter);
+
+    const auto selection = request.multiple ? QAbstractItemView::ExtendedSelection
+                                            : QAbstractItemView::SingleSelection;
+    m_iconView->setSelectionMode(selection);
+    m_detailView->setSelectionMode(selection);
+    connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &MainWindow::updateChooser);
+
+    if (!restoreGeometry(QSettings().value("chooser/geometry").toByteArray()))
+        resize(960, 620);
+
+    // Start where the app asked, else where this app saved or opened last.
+    QString start = request.currentFolder;
+    if (start.isEmpty() || !QFileInfo(start).isDir())
+        start = QSettings().value(chooserFolderKey()).toString();
+    if (start.isEmpty() || !QFileInfo(start).isDir())
+        start = QDir::homePath();
+    if (request.mode == Mode::Save && QFileInfo(request.currentFile).isFile())
+        showItems({request.currentFile});
+    else
+        navigateTo(start);
+    refreshChrome(); // the title
+
+    // On top of the app that asked (X11; Wayland handles need xdg-foreign).
+    if (request.parentWindow.startsWith(QLatin1String("x11:"))) {
+        bool ok = false;
+        const WId id = WId(request.parentWindow.mid(4).toULongLong(&ok, 16));
+        if (ok && id && windowHandle()) {
+            m_chooserParent = QWindow::fromWinId(id);
+            if (m_chooserParent) {
+                connect(this, &QObject::destroyed, m_chooserParent, &QObject::deleteLater);
+                windowHandle()->setTransientParent(m_chooserParent);
+                const QRect parent = m_chooserParent->geometry();
+                if (parent.isValid() && parent.width() > 100)
+                    move(parent.center() - rect().center());
+            }
+        }
+    }
+    updateChooser();
+    if (request.mode == Mode::Save)
+        QTimer::singleShot(0, this, [this] { m_chooserBar->focusName(); });
+}
+
+void MainWindow::cancelChooser()
+{
+    finishChooser(FileChooserPortal::Cancelled);
+}
+
+QString MainWindow::chooserFolderKey() const
+{
+    QString app = m_chooser ? m_chooser->appId : QString();
+    app.replace(QLatin1Char('/'), QLatin1Char('_'));
+    return QStringLiteral("chooser/lastFolder/") + (app.isEmpty() ? QStringLiteral("host") : app);
+}
+
+void MainWindow::keepChooserActionsOff()
+{
+    if (!m_chooser)
+        return;
+    for (QAction *action : std::as_const(m_chooserOff)) {
+        action->setEnabled(false);
+        action->setVisible(false);
+    }
+}
+
+void MainWindow::updateChooser()
+{
+    if (!m_chooser || !m_chooserBar)
+        return;
+    using Mode = ChooserRequest::Mode;
+    const QStringList selected = selectedPaths();
+    if (m_chooser->mode == Mode::Save && selected.size() == 1 && !QFileInfo(selected.first()).isDir())
+        m_chooserBar->setName(QFileInfo(selected.first()).fileName()); // save over that one
+    bool canAccept = true;
+    if (m_chooser->mode == Mode::Open && !m_chooser->directory)
+        canAccept = !selected.isEmpty();
+    m_chooserBar->setAcceptEnabled(canAccept);
+}
+
+void MainWindow::chooserAccept()
+{
+    if (!m_chooser || m_chooserDone)
+        return;
+    using Mode = ChooserRequest::Mode;
+    const ChooserRequest &request = *m_chooser;
+    const QStringList selected = selectedPaths();
+    const bool realFolder = !DirectoryModel::isVirtualPath(m_current) && !m_model->isTrash()
+                            && QFileInfo(m_current).isDir();
+
+    if (request.mode == Mode::Open) {
+        if (m_model->isTrash() && !selected.isEmpty()) {
+            showMessage(tr("Restore it from the Trash first"));
+            return;
+        }
+        if (request.directory) {
+            QStringList folders;
+            for (const QString &path : selected)
+                if (QFileInfo(path).isDir())
+                    folders.append(path);
+            if (folders.isEmpty()) {
+                if (!realFolder) {
+                    showMessage(tr("Choose a folder"));
+                    return;
+                }
+                folders.append(m_current);
+            }
+            if (!request.multiple)
+                folders = {folders.first()};
+            finishChooser(FileChooserPortal::Success, folders);
+            return;
+        }
+        QStringList files;
+        for (const QString &path : selected)
+            if (!QFileInfo(path).isDir())
+                files.append(path);
+        if (files.isEmpty()) {
+            if (selected.size() == 1)
+                navigateTo(selected.first()); // a folder: go in
+            else
+                showMessage(tr("Choose a file"));
+            return;
+        }
+        finishChooser(FileChooserPortal::Success, files);
+        return;
+    }
+
+    // Saving: into a real folder you can write to.
+    QString folder = m_current;
+    if (request.mode == Mode::SaveFiles && selected.size() == 1 && QFileInfo(selected.first()).isDir())
+        folder = selected.first();
+    else if (!realFolder) {
+        showMessage(tr("Choose a folder to save in"));
+        return;
+    }
+    if (!QFileInfo(folder).isWritable()) {
+        showMessage(tr("You can't save in this folder"));
+        return;
+    }
+    // The question runs its own event loop: meanwhile the app may give up
+    // (Request.Close), which closes and deletes this window, or Save may be
+    // pressed again. So one question at a time, and nothing goes on if the
+    // window is gone.
+    if (m_chooserAsking)
+        return;
+    QPointer<MainWindow> self(this);
+    auto confirmReplace = [this, self](const QStringList &existing) {
+        const QFileInfo first(existing.first());
+        const QString title = existing.size() == 1 ? tr("Replace “%1”?").arg(first.fileName())
+                                                   : tr("Replace %n files?", nullptr, int(existing.size()));
+        const QString text = existing.size() == 1
+                                 ? tr("A file with this name already exists in “%1”. Saving replaces its contents.")
+                                       .arg(first.dir().dirName())
+                                 : tr("Files with these names already exist in “%1”. Saving replaces their contents.")
+                                       .arg(first.dir().dirName());
+        QPointer<QMessageBox> box = new QMessageBox(QMessageBox::Warning, title, text, QMessageBox::NoButton, this);
+        QPushButton *cancel = box->addButton(tr("Cancel"), QMessageBox::RejectRole);
+        QPushButton *replace = box->addButton(tr("Replace"), QMessageBox::AcceptRole);
+        box->setDefaultButton(cancel);
+        m_chooserAsking = true;
+        box->exec();
+        if (!self) // deleted with the window
+            return false;
+        m_chooserAsking = false;
+        const bool yes = box && box->clickedButton() == replace;
+        delete box;
+        return yes && !m_chooserDone;
+    };
+
+    if (request.mode == Mode::Save) {
+        const QString name = m_chooserBar->name().trimmed();
+        if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String("..")) {
+            m_chooserBar->focusName();
+            return;
+        }
+        QString path = name;
+        if (path.startsWith(QLatin1String("~/")))
+            path = QDir::homePath() + path.mid(1);
+        if (!QDir::isAbsolutePath(path))
+            path = QDir(folder).filePath(path);
+        path = QDir::cleanPath(path);
+        if (QFileInfo(path).isDir()) { // typed a folder's name: go there
+            navigateTo(path);
+            m_chooserBar->setName(QString());
+            return;
+        }
+        const QFileInfo target(path);
+        if (!QFileInfo(target.absolutePath()).isDir()) {
+            showMessage(tr("The folder “%1” doesn't exist").arg(target.absolutePath()));
+            return;
+        }
+        if (target.exists() && !confirmReplace({path}))
+            return;
+        finishChooser(FileChooserPortal::Success, {path});
+        return;
+    }
+    const QStringList paths = request.saveFilesPaths(folder);
+    QStringList existing;
+    for (const QString &path : paths)
+        if (QFileInfo::exists(path))
+            existing.append(path);
+    if (!existing.isEmpty() && !confirmReplace(existing))
+        return;
+    finishChooser(FileChooserPortal::Success, paths);
+}
+
+void MainWindow::finishChooser(uint response, const QStringList &paths)
+{
+    if (!m_chooser || m_chooserDone)
+        return;
+    m_chooserDone = true;
+    QVariantMap results;
+    if (response == FileChooserPortal::Success) {
+        results = m_chooser->results(paths, m_chooserBar->choiceValues(), m_chooserBar->currentFilter());
+        if (!DirectoryModel::isVirtualPath(m_current) && !m_model->isTrash())
+            QSettings().setValue(chooserFolderKey(), m_current);
+    }
+    QSettings().setValue("chooser/geometry", saveGeometry());
+    emit chooserFinished(response, results);
+    QTimer::singleShot(0, this, &QWidget::close); // not from inside closeEvent
+}
+#endif

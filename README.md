@@ -184,6 +184,12 @@ Notes:
 - If Nautilus is already running in the background, "Show in folder" keeps going to it until it stops (`nautilus -q`, or log out and in once).
 - The dock's **Files** icon still starts Nautilus: right-click it → *Unpin*, then right-click Argonaut → *Pin to Dash*.
 
+### Open and Save windows for other apps
+
+Apps like Firefox, Signal and Chrome ask the desktop for their **Open** and **Save** windows. **Preferences → Open and Save Windows → Use Argonaut for Open and Save** makes those Argonaut windows: your sidebar, bookmarks, search and views, the app's file types and options at the bottom, and a question before a file is replaced. They also open faster than GNOME's own (about 0.1 s here).
+
+It works with the `.deb` package (the desktop portal only looks in `/usr/share`), and it changes only your own `~/.config/xdg-desktop-portal/` settings; the same button switches back.
+
 ## Developing in VS Code
 
 Open the folder in VS Code and install the recommended extensions when asked (C/C++, CMake Tools, Qt). Pick the **Debug** preset, then press **F7** to build or **F5** to run with the debugger. Tests appear in the Testing panel.

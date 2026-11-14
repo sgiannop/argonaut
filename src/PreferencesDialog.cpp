@@ -5,6 +5,9 @@
 #include "KeyStore.h"
 #include "GitStatus.h"
 #include "MainWindow.h"
+#if defined(ARGONAUT_DBUS)
+#include "PortalConfig.h"
+#endif
 #include "Theme.h"
 #include "Thumbnailer.h"
 
@@ -275,6 +278,54 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     layout->addWidget(defaultHint);
     layout->addSpacing(6);
     layout->addLayout(defaultRow);
+#endif
+#if defined(ARGONAUT_DBUS)
+    // Other apps' Open and Save windows: Argonaut or the desktop's own.
+    layout->addSpacing(18);
+    auto *chooserHeading = new QLabel(tr("Open and Save Windows"), this);
+    chooserHeading->setObjectName("prefHeading");
+    auto *chooserHint = new QLabel(this);
+    chooserHint->setObjectName("prefHint");
+    chooserHint->setWordWrap(true);
+    auto *chooserButton = new QPushButton(this);
+    chooserButton->setObjectName("prefButton");
+    chooserButton->setCursor(Qt::PointingHandCursor);
+    auto *chooserRow = new QHBoxLayout;
+    chooserRow->addWidget(chooserButton);
+    chooserRow->addStretch();
+    auto refreshChooser = [chooserHint, chooserButton] {
+        if (!PortalConfig::isInstalled()) {
+            chooserHint->setText(tr("Install the argonaut-files package to use Argonaut when other apps "
+                                    "(Firefox, Signal, Chrome…) open or save files."));
+            chooserButton->setText(tr("Use Argonaut for Open and Save"));
+            chooserButton->setEnabled(false);
+        } else if (PortalConfig::isEnabled()) {
+            chooserHint->setText(tr("When other apps open or save files, they show an Argonaut window. "
+                                    "Apps that are already running switch the next time you open one."));
+            chooserButton->setText(tr("Use the Desktop's Windows Again"));
+            chooserButton->setEnabled(true);
+        } else {
+            chooserHint->setText(tr("Other apps show the desktop's own window to open or save files. "
+                                    "Argonaut can show its own instead, with your sidebar, search and views."));
+            chooserButton->setText(tr("Use Argonaut for Open and Save"));
+            chooserButton->setEnabled(true);
+        }
+    };
+    refreshChooser();
+    connect(chooserButton, &QPushButton::clicked, this, [this, refreshChooser, chooserHint] {
+        QString error;
+        const bool ok = PortalConfig::isEnabled() ? PortalConfig::disable(&error) : PortalConfig::enable(&error);
+        if (ok)
+            PortalConfig::restartPortal(); // applies now, not after the next login
+        refreshChooser();
+        if (!ok)
+            chooserHint->setText(error);
+        adjustSize();
+    });
+    layout->addWidget(chooserHeading);
+    layout->addWidget(chooserHint);
+    layout->addSpacing(6);
+    layout->addLayout(chooserRow);
 #endif
 
     addClaudeSection(layout);

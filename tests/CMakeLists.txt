@@ -68,6 +68,11 @@ if(TARGET Qt6::DBus AND DBUS_RUN_SESSION)
     target_link_libraries(tst_fmservice PRIVATE argonaut_core Qt6::Test)
     add_test(NAME fmservice COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_fmservice>)
     set_tests_properties(fmservice PROPERTIES ENVIRONMENT "ARGONAUT_PRIVATE_BUS=1" TIMEOUT 60)
+
+    qt_add_executable(tst_filechooser tst_filechooser.cpp)
+    target_link_libraries(tst_filechooser PRIVATE argonaut_core Qt6::Test)
+    add_test(NAME filechooser COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_filechooser>)
+    set_tests_properties(filechooser PROPERTIES ENVIRONMENT "ARGONAUT_PRIVATE_BUS=1" TIMEOUT 60)
 endif()
 
 qt_add_executable(tst_preview tst_preview.cpp)

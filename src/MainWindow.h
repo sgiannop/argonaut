@@ -10,6 +10,14 @@
 #include <QStack>
 #include <QString>
 
+#if defined(ARGONAUT_DBUS)
+#include "FileChooserRequest.h"
+#include <optional>
+class ChooserBar;
+class QVBoxLayout;
+class QWindow;
+#endif
+
 class DirectoryModel;
 class DiskUsageModel;
 class QuickLook;
@@ -39,6 +47,7 @@ class QTimer;
 class QToolButton;
 class QKeyEvent;
 class QHBoxLayout;
+class QVBoxLayout;
 
 class QHeaderView;
 
@@ -57,7 +66,19 @@ public:
     // in folder"); items in other folders open in tabs.
     void showItems(const QStringList &items);
 
+#if defined(ARGONAUT_DBUS)
+    // Open/Save for another app (`argonaut --portal`): call right after
+    // construction. The window then answers once, through chooserFinished
+    // (FileChooserPortal's response and results), and closes.
+    void startChooser(const ChooserRequest &request);
+    void cancelChooser(); // the app gave up (Request.Close)
+
+signals:
+    void chooserFinished(uint response, const QVariantMap &results);
+#endif
+
 protected:
+    void keyPressEvent(QKeyEvent *event) override;
     void changeEvent(QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -491,4 +512,20 @@ private:
     void ensureSecondPane();
     QString otherPaneFolder() const; // where F5/F6 copy and move to, or empty
     void transferToOtherPane(bool move);
+
+#if defined(ARGONAUT_DBUS)
+    // Open/Save window (startChooser).
+    void chooserAccept();
+    void finishChooser(uint response, const QStringList &paths = {});
+    void updateChooser(); // selection changed: the name field, the accept button
+    void keepChooserActionsOff();
+    QString chooserFolderKey() const;
+    std::optional<ChooserRequest> m_chooser;
+    ChooserBar *m_chooserBar = nullptr;
+    bool m_chooserDone = false;
+    bool m_chooserAsking = false; // the "Replace?" question is open
+    QList<QAction *> m_chooserOff; // commands an Open/Save window doesn't offer
+    QWindow *m_chooserParent = nullptr;
+#endif
+    QVBoxLayout *m_contentLayout = nullptr;
 };
