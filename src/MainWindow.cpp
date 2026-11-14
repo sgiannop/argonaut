@@ -946,6 +946,10 @@ void MainWindow::setupUi()
     menuLayout->addWidget(buildMenuBar(), 1); // its empty space drags the window
     if (m_csd)
         addWindowButtons(menuLayout);
+    // The row drags too: the menu bar can be lower than the row (and is only
+    // a thin band when its menus are hidden, as in an Open/Save window).
+    m_menuRow = menuRow;
+    menuRow->installEventFilter(this);
     rootLayout->addWidget(menuRow, 0);
 #endif
 
@@ -3405,17 +3409,20 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 
     // Empty menu bar space behaves like the header bars: drag to move,
     // double-click to maximise.
-    if (m_csd && m_menuBar && watched == m_menuBar) {
+    if (m_csd && m_menuBar && (watched == m_menuBar || watched == m_menuRow)) {
         auto *me = static_cast<QMouseEvent *>(event);
+        // On the bar, a menu title is for its menu; the row has none.
+        const bool onMenu = watched == m_menuBar && (event->type() == QEvent::MouseButtonPress
+                                                     || event->type() == QEvent::MouseButtonDblClick)
+                            && m_menuBar->actionAt(me->position().toPoint());
         switch (event->type()) {
         case QEvent::MouseButtonPress:
-            m_menuPressed = me->button() == Qt::LeftButton
-                            && !m_menuBar->actionAt(me->position().toPoint());
-            m_menuPressPos = me->position().toPoint();
+            m_menuPressed = me->button() == Qt::LeftButton && !onMenu;
+            m_menuPressPos = me->globalPosition().toPoint();
             break;
         case QEvent::MouseMove:
             if (m_menuPressed && (me->buttons() & Qt::LeftButton)
-                && (me->position().toPoint() - m_menuPressPos).manhattanLength()
+                && (me->globalPosition().toPoint() - m_menuPressPos).manhattanLength()
                        >= QApplication::startDragDistance()) {
                 m_menuPressed = false;
                 windowHandle()->startSystemMove();
@@ -3426,7 +3433,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             m_menuPressed = false;
             break;
         case QEvent::MouseButtonDblClick:
-            if (!m_menuBar->actionAt(me->position().toPoint())) {
+            if (!onMenu) {
                 isMaximized() ? showNormal() : showMaximized();
                 return true;
             }

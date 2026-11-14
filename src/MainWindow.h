@@ -528,4 +528,5 @@ private:
     QWindow *m_chooserParent = nullptr;
 #endif
     QVBoxLayout *m_contentLayout = nullptr;
+    QWidget *m_menuRow = nullptr; // the menu bar's row; drags the window like the bar
 };

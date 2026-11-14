@@ -67,7 +67,7 @@ In VS Code, CMake Tools' Testing panel runs them too. Formatting: `.clang-format
 - Window chrome: on Linux and Windows the window is frameless (client-side decorations). Set `ARGONAUT_NATIVE_DECORATIONS=1` to turn that off; macOS always uses the native frame.
   - Two `HeaderBar`s, one above the sidebar and one above the content, act as the title bar. Dragging empty space calls `startSystemMove`; double-click maximises.
   - Edge resizing is handled by an event filter on the `QWindow` (`MainWindow::eventFilter` → `startSystemResize`).
-  - The window buttons only exist when `m_csd` is true. They sit at the right end of the menu bar row (`menuRow`: the `QMenuBar` stretched, then `addWindowButtons`), not in the header bar. `menuRow` carries the bottom border, so it runs under the buttons too.
+  - The window buttons only exist when `m_csd` is true. They sit at the right end of the menu bar row (`menuRow`: the `QMenuBar` stretched, then `addWindowButtons`), not in the header bar. `menuRow` carries the bottom border, so it runs under the buttons too. The row itself drags and maximises as well (`m_menuRow` shares the menu bar's event-filter branch): a `QMenuBar` whose menus are hidden (Open/Save windows) is only ~2 px tall, so drags that relied on the bar alone worked only on that band.
 - Main view:
   - `DirectoryModel` is a flat table model (Name/Size/Type/Modified) of one folder. Don't go back to `QFileSystemModel`, which was ~5x slower on big folders and couldn't keep folders-first natural order.
     - `setPath()` lists the folder on a worker thread, using a generation counter to drop stale results. Big folders arrive in batches (the first after 15 ms). `loaded` fires when the listing is complete.
